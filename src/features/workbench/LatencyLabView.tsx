@@ -8,6 +8,7 @@ import {
   RadioTower,
   RotateCcw,
   Sparkles,
+  Stethoscope,
   X,
 } from "lucide-react";
 import { useLatencyLab } from "./useLatencyLab";
@@ -16,6 +17,7 @@ import GraphEditor from "../graph-editor/GraphEditor";
 import SimulationPanel from "../simulation/SimulationPanel";
 import ScenarioPanel from "../scenarios/ScenarioPanel";
 import ArchivePanel from "../archive/ArchivePanel";
+import HealthPanel from "../health/HealthPanel";
 import Sidebar, { type NavigationItem } from "./Sidebar";
 
 const navigation: NavigationItem[] = [
@@ -38,6 +40,12 @@ const navigation: NavigationItem[] = [
     label: "本地项目区",
     sublabel: "LOCAL ARCHIVE",
     icon: Archive,
+  },
+  {
+    id: "health",
+    label: "工作区体检",
+    sublabel: "HEALTH CHECK",
+    icon: Stethoscope,
   },
 ];
 
@@ -187,6 +195,24 @@ export default function LatencyLabView() {
               onDuplicate={vm.duplicateActive}
               onDelete={vm.deleteProject}
               onRetrySave={vm.retrySave}
+            />
+          )}
+          {vm.module === "health" && (
+            <HealthPanel
+              report={vm.healthReport}
+              scanning={vm.healthScanning}
+              fixing={vm.healthFixing}
+              budgetChanges={vm.budgetChanges}
+              backup={vm.healthBackup}
+              projects={vm.document.projects}
+              onScan={vm.runHealthScan}
+              onFix={vm.fixHealthIssues}
+              onFixAll={vm.fixAllHealthIssues}
+              onRollback={vm.rollbackHealthRepair}
+              onLocate={(projectId) => {
+                vm.chooseProject(projectId);
+                vm.setModule("graph");
+              }}
             />
           )}
         </div>

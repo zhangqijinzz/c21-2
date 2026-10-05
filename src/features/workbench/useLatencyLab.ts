@@ -1,10 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ProjectRepository } from "../../shared/repositories/projectRepository";
+import {
+  ProjectRepository,
+  type WorkspaceBackup,
+} from "../../shared/repositories/projectRepository";
 import type {
   LatencyProject,
   SimulationMode,
   WorkspaceDocument,
 } from "../../shared/domain/types";
+import {
+  applyHealthFixes,
+  buildHealthReport,
+  diffBudgets,
+  type BudgetChange,
+  type HealthReport,
+} from "../../shared/domain/health";
 import {
   createProject,
   duplicateProject,
@@ -32,7 +42,7 @@ import { simulateProject } from "../../shared/domain/simulation";
 export type LabStatus =
   "loading" | "ready" | "editing" | "simulating" | "error" | "completed";
 export type LabModule =
-  "projects" | "graph" | "simulation" | "scenarios" | "archive";
+  "projects" | "graph" | "simulation" | "scenarios" | "archive" | "health";
 
 export function useLatencyLab() {
   const repository = useMemo(() => new ProjectRepository(), []);
@@ -48,6 +58,13 @@ export function useLatencyLab() {
   const [notice, setNotice] = useState("");
   const [persisted, setPersisted] = useState<"saving" | "saved" | "error">(
     "saved",
+  );
+  const [healthReport, setHealthReport] = useState<HealthReport | null>(null);
+  const [healthScanning, setHealthScanning] = useState(false);
+  const [healthFixing, setHealthFixing] = useState(false);
+  const [budgetChanges, setBudgetChanges] = useState<BudgetChange[]>([]);
+  const [healthBackup, setHealthBackup] = useState<WorkspaceBackup | null>(
+    null,
   );
   const queue = useRef(Promise.resolve());
   const revision = useRef(0);
@@ -266,6 +283,95 @@ export function useLatencyLab() {
     if (current) commit(current);
   }, [commit]);
 
+  const runHealthScan = useCallback(async () => {
+    const current = documentRef.current;
+    if (!current) return;
+    setHealthScanning(true);
+    try {
+      const layers = await repository.inspect();
+      setHealthReport(
+        buildHealthReport({ document: current, ...layers, mode }),
+      );
+      setBudgetChanges([]);
+      setHealthBackup(await repository.loadBackup());
+    } catch {
+      setNotice("体检扫描失败，请重试。");
+    } finally {
+      setHealthScanning(false);
+    }
+  }, [repository, mode]);
+
+  const fixHealthIssues = useCallback(
+    async (ids: string[]) => {
+      const current = documentRef.current;
+      const report = healthReport;
+      if (!current || !report || !ids.length || healthFixing) return;
+      setHealthFixing(true);
+      try {
+        let backup: WorkspaceBackup;
+        try {
+          backup = await repository.saveBackup(current);
+        } catch {
+          setNotice("无法创建回退副本，已取消本次修复。");
+          return;
+        }
+        setHealthBackup(backup);
+        const next = applyHealthFixes(current, report.issues, ids);
+        const affected = [
+          ...new Set(
+            report.issues
+              .filter((issue) => ids.includes(issue.id))
+              .map((issue) => issue.projectId)
+              .filter(Boolean),
+          ),
+        ];
+        commit(next);
+        await queue.current;
+        const layers = await repository.inspect();
+        const nextReport = buildHealthReport({
+          document: next,
+          ...layers,
+          mode,
+        });
+        setHealthReport(nextReport);
+        setBudgetChanges(
+          diffBudgets(report.budgets, nextReport.budgets, affected),
+        );
+        setNotice(`已修复 ${ids.length} 项，修复前的工作区已存入回退副本。`);
+      } finally {
+        setHealthFixing(false);
+      }
+    },
+    [healthReport, healthFixing, repository, commit, mode],
+  );
+
+  const fixAllHealthIssues = useCallback(() => {
+    if (!healthReport) return;
+    void fixHealthIssues(
+      healthReport.issues
+        .filter((issue) => issue.fixable)
+        .map((issue) => issue.id),
+    );
+  }, [healthReport, fixHealthIssues]);
+
+  const rollbackHealthRepair = useCallback(async () => {
+    const backup = await repository.loadBackup();
+    if (!backup) {
+      setNotice("没有找到可回退的副本。");
+      return;
+    }
+    commit(backup.document);
+    await queue.current;
+    await repository.clearBackup();
+    setHealthBackup(null);
+    setBudgetChanges([]);
+    const layers = await repository.inspect();
+    setHealthReport(
+      buildHealthReport({ document: backup.document, ...layers, mode }),
+    );
+    setNotice("已回退到修复前的工作区。");
+  }, [repository, commit, mode]);
+
   return {
     document,
     activeProject,
@@ -295,6 +401,15 @@ export function useLatencyLab() {
     removeSavedScenario,
     restoreSavedScenario,
     retrySave,
+    healthReport,
+    healthScanning,
+    healthFixing,
+    budgetChanges,
+    healthBackup,
+    runHealthScan,
+    fixHealthIssues,
+    fixAllHealthIssues,
+    rollbackHealthRepair,
     scenarioList,
     baselineScenario,
     comparisonScenario,
