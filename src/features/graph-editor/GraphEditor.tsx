@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Plus, GitBranch, CircleHelp } from "lucide-react";
 import type { LatencyProject, RequestNode } from "../../shared/domain/types";
 import type { GraphAnalysis } from "../../shared/domain/graph";
@@ -7,6 +7,8 @@ import NodeInspector from "./NodeInspector";
 interface Props {
   project: LatencyProject;
   graph: GraphAnalysis;
+  initialNodeId?: string;
+  onInspected?: () => void;
   onAdd: () => void;
   onPatch: (id: string, patch: Partial<RequestNode>) => void;
   onDelete: (id: string) => void;
@@ -16,12 +18,25 @@ interface Props {
 export default function GraphEditor({
   project,
   graph,
+  initialNodeId,
+  onInspected,
   onAdd,
   onPatch,
   onDelete,
   onDependency,
 }: Props) {
   const [selectedId, setSelectedId] = useState("");
+  useEffect(() => {
+    if (
+      initialNodeId &&
+      project.nodes.some((node) => node.id === initialNodeId)
+    ) {
+      setSelectedId(initialNodeId);
+      onInspected?.();
+    }
+    // 仅响应体检面板发起的定位请求。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialNodeId]);
   const selected =
     project.nodes.find((node) => node.id === selectedId) ?? project.nodes[0];
   return (

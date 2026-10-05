@@ -28,11 +28,12 @@ import {
 } from "../scenarios/scenarioViewModel";
 import { removeProject, updateProject } from "../projects/projectViewModel";
 import { simulateProject } from "../../shared/domain/simulation";
+import { useHealthCheck } from "../health/useHealthCheck";
 
 export type LabStatus =
   "loading" | "ready" | "editing" | "simulating" | "error" | "completed";
 export type LabModule =
-  "projects" | "graph" | "simulation" | "scenarios" | "archive";
+  "projects" | "graph" | "simulation" | "scenarios" | "archive" | "health";
 
 export function useLatencyLab() {
   const repository = useMemo(() => new ProjectRepository(), []);
@@ -48,6 +49,9 @@ export function useLatencyLab() {
   const [notice, setNotice] = useState("");
   const [persisted, setPersisted] = useState<"saving" | "saved" | "error">(
     "saved",
+  );
+  const [inspectNodeId, setInspectNodeId] = useState<string | undefined>(
+    undefined,
   );
   const queue = useRef(Promise.resolve());
   const revision = useRef(0);
@@ -117,7 +121,7 @@ export function useLatencyLab() {
       setStatus(nextStatus);
       setNotice("");
       setPersisted("saving");
-      queue.current = queue.current
+      return (queue.current = queue.current
         .then(() => repository.save(next))
         .then(() => {
           if (revision.current === currentRevision) {
@@ -131,7 +135,7 @@ export function useLatencyLab() {
             setStatus("error");
             setNotice("保存失败。数据仍保留在当前页面，请重试保存。");
           }
-        });
+        }));
     },
     [repository],
   );
@@ -266,6 +270,29 @@ export function useLatencyLab() {
     if (current) commit(current);
   }, [commit]);
 
+  const commitWithoutStatusChange = useCallback(
+    (next: WorkspaceDocument) => commit(next, "ready"),
+    [commit],
+  );
+
+  const health = useHealthCheck({
+    repository,
+    document,
+    onCommit: commitWithoutStatusChange,
+  });
+
+  const openHealthLocation = useCallback(
+    (projectId: string, nodeId?: string) => {
+      if (documentRef.current?.activeProjectId !== projectId)
+        commit(selectProject(documentRef.current!, projectId), "ready");
+      setInspectNodeId(nodeId);
+      setModule("graph");
+    },
+    [commit],
+  );
+
+  const clearInspectNode = useCallback(() => setInspectNodeId(undefined), []);
+
   return {
     document,
     activeProject,
@@ -300,5 +327,9 @@ export function useLatencyLab() {
     comparisonScenario,
     scenarioComparison,
     selectComparisonScenario,
+    inspectNodeId,
+    clearInspectNode,
+    openHealthLocation,
+    health,
   };
 }
